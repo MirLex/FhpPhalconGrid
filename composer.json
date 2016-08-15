@@ -1,0 +1,31 @@
+{
+  "name" : "fullhouse-productions/fhp-phalcon-grid",
+  "description" : "This is an grid module for phalcon",
+  "require" : {
+    "fullhouse-productions/fhp-phalcon-auth" : "~1.0@dev",
+    "fullhouse-productions/fhp-phalcon-helper" : "~1.0@dev",
+    "php" : ">=5.3.9",
+    "ext-phalcon" : ">=2.0.0"
+  },
+  "require-dev": {
+    "phpunit/phpunit": "4.8.*",
+    "phalcon/incubator": "^2.0"
+  },
+  "authors" : [ {
+    "name" : "Patrick Ascher",
+    "email": "pat@fullhouse-productions.com",
+    "homepage": "http://www.fullhouse-productions.com"
+  }],
+  "extra": {
+    "branch-alias": {
+      "dev-master": "1.0.x-dev"
+    }
+  },
+  "autoload": {
+    "psr-4": { "FhpPhalconGrid\\": "src/" }
+  },
+  "keywords" : ["phalcon", "framework", "grid","crud","fullhouse-productions" ],
+  "type" : "library",
+  "license" : "MIT",
+  "homepage": "https://github.com/fullhouse-productions/FhpPhalconGrid"
+}

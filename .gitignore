@@ -1,0 +1,6 @@
+composer.lock
+.idea/
+.vagrant/
+.phalcon
+app/cache/
+vendor/
