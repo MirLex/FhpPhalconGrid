@@ -20,7 +20,7 @@ use Phalcon\Http\Request;
 use Phalcon\Mvc\Model;
 use Phalcon\Mvc\User\Component;
 use Phalcon\Mvc\View;
-use Phalcon\Paginator\Pager;
+//use Phalcon\Paginator\Pager;
 use Phalcon\Text;
 use Phalcon\Validation;
 
@@ -204,6 +204,9 @@ class Grid extends Component implements EventsAwareInterface
             foreach ($model->getModelsManager()->getRelations($modelName) as $relation) {
                 $relationModelName = $relation->getReferencedModel();
                 $relationAliasName = $relation->getOption('alias');
+
+                //deleting old entries
+                $model->{$relationAliasName}->delete();
 
                 $newEntityObjects = array();
                 foreach ($request[Group::GROUP_PREFIX . $relationAliasName] as $row => $relationValue) {
