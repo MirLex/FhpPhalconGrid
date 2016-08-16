@@ -9,15 +9,8 @@
  */
 namespace FhpPhalconGrid\Helper;
 
-use Fabfuel\Prophiler\Aggregator\Cache\CacheAggregator;
-use Fabfuel\Prophiler\Aggregator\Database\QueryAggregator;
-use Fabfuel\Prophiler\DataCollector\Request;
-use Fabfuel\Prophiler\Plugin\Manager\Phalcon;
-use Fabfuel\Prophiler\Profiler;
-use Fabfuel\Prophiler\Toolbar;
 use FhpPhalconAuth\Entity\Role;
 use FhpPhalconGrid\Grid\Action;
-use FhpPhalconAuth\Helper\Profiler\User;
 use FhpPhalconAuth\Rbac\Guard\RouterGuard;
 use FhpPhalconAuth\Rbac\Rbac;
 use Phalcon\Acl;
@@ -40,9 +33,6 @@ class Services
 
     /** @var FactoryDefault */
     public static $di;
-
-    /** @var Profiler $profiler */
-    protected $profiler;
 
     /**
      * @param Di|null $di
@@ -77,7 +67,6 @@ class Services
         $this->registerModelsMetadata();
         $this->registerSession();
         $this->registerFlash();
-        $this->registerProfiler();
         $this->registerSecurity();
         $this->registerBeanstalk();
         $this->registerConfig();
@@ -351,36 +340,4 @@ class Services
         return $this;
     }
 
-    /**
-     * @return Services $this
-     */
-    public function registerProfiler()
-    {
-
-        $this->profiler = new Profiler();
-        $this->profiler->addAggregator(new QueryAggregator());
-        $this->profiler->addAggregator(new CacheAggregator());
-
-        self::$di->setShared('profiler', $this->profiler);
-
-        $pluginManager = new Phalcon(self::$di->getShared('profiler'));
-        $pluginManager->register();
-
-        return $this->profiler;
-    }
-
-    /**
-     * @return Services $this
-     */
-    public function renderProfilerToolbar()
-    {
-        if ($this->profiler === null) {
-            $this->registerProfiler();
-        }
-        $toolbar = new Toolbar($this->profiler);
-        $toolbar->addDataCollector(new Request());
-        $toolbar->addDataCollector(new User());
-
-        return $toolbar;
-    }
 }

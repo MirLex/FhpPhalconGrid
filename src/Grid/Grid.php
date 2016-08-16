@@ -89,19 +89,14 @@ class Grid extends Component implements EventsAwareInterface
      */
     private $gridUrlParams = null;
 
-    //TODO delete
-    private $debug = array();
-
     /**
      * @var
      */
     protected $_eventsManager = null;
 
-
     public function __construct(DiInterface $di)
     {
         $this->setDI($di);
-        $this->debug['grid'] = $this->getDI()->get('profiler')->start('Grid-total', array(), 'Grid');
         if (!$this->getDI()->has('eventsManager')) {
             throw new Exception('Please initialize the eventsManager service!');
         }
@@ -146,37 +141,23 @@ class Grid extends Component implements EventsAwareInterface
         }
 
         //initialize actions
-        $profiler = $this->getDI()->get('profiler')->start('getAction()', array(), 'Grid');
         $this->action = $this->getAction();
-        $profiler->stop();
 
         //create entity to table mapper
-        $profiler = $this->getDI()->get('profiler')->start('mapper', array(), 'Grid');
         $reflector = new \ReflectionClass(get_class($source));
         $fn = $reflector->getFileName();
         $this->mapper = new Mapper($this->getDI(), dirname($fn));
 
-        $profiler->stop();
-
         //create query of a entity
-        $profiler = $this->getDI()->get('profiler')->start('buildQuery', array(), 'Grid');
         if (is_a($source, '\Phalcon\Mvc\Model')) {
             $source = $this->_buildQuery($source);
         }
-        $profiler->stop();
-
         $this->query = $source;
 
-
-        $profiler = $this->getDI()->get('profiler')->start('createColumns()', array(), 'Grid');
         $this->_createColumns();
-        $profiler->stop();
-
 
         //set grid mode
-        $profiler = $this->getDI()->get('profiler')->start('setGridMode()', array(), 'Grid');
         $this->_setGridMode();
-        $profiler->stop();
 
         //DELETE - no render of the Grid needed
         $this->_delete();
@@ -531,8 +512,6 @@ class Grid extends Component implements EventsAwareInterface
             $this->_save();
         } else {
 
-            $profiler = $this->getDI()->get('profiler')->start('render()', array(), 'Grid');
-
             /*
              * removes the action column if all action types are invisible
              * if not, there is a check if the user added keys manually
@@ -594,10 +573,6 @@ class Grid extends Component implements EventsAwareInterface
             //$this->getEventsManager()->fire("grid:afterQuery", $this, $result);
 
             $this->view->data = $this->result;
-
-            $profiler->stop();
-            $this->debug['grid']->stop();
-
         }
     }
 
