@@ -12,6 +12,7 @@ namespace FhpPhalconGrid\Grid;
 
 use FhpPhalconGrid\Grid\Mapper\Entity;
 use FhpPhalconGrid\Grid\Mapper\Exception;
+use Phalcon\Annotations\Adapter\Memory;
 use Phalcon\DiInterface;
 use Phalcon\Mvc\User\Component;
 
@@ -72,7 +73,7 @@ class Mapper extends Component
      */
     public function getColumnsOfEntity($entity, $noRemovedColumns = null)
     {
-        
+
         if (is_object($entity)) {
             $entity = get_class($entity);
         }
@@ -87,6 +88,25 @@ class Mapper extends Component
         }
 
         return array_keys($this->columns[$entity]);
+    }
+
+
+    public function getKeysToHideFromModelName($model)
+    {
+        $keys = array();
+
+        if (!isset($this->entities[$model])) {
+            throw new Exception('The model "' . $model . '" is unknown!');
+        }
+
+        if (count($this->entities[$model]->getPrimary()) > 0) {
+            $keys = array_merge($keys, $this->entities[$model]->getPrimary());
+        }
+        if (count($this->entities[$model]->getRelatedFields()) > 0) {
+            $keys = array_merge($keys, $this->entities[$model]->getRelatedFields());
+        }
+
+        return $keys;
     }
 
     public function getPrimaryAndUniqueKey($from)
@@ -175,7 +195,6 @@ class Mapper extends Component
      */
     public function getModelNameFromAlias($alias)
     {
-
         $table = $alias;
         if (isset($this->aliasToModel[$alias])) {
             $table = $this->aliasToModel[$alias];
@@ -218,24 +237,53 @@ class Mapper extends Component
         }
     }
 
-    /**
-     * read the entity dir and save the array in the cache
-     * @param null|String $dir
-     * @return array
-     */
-    private function _readEntityDir($dir = null)
+
+    public function _readControllerDir($dirs = null)
     {
-
-        if ($dir === null) {
-            $dir = $this->getDI()->get('config')->get('application')->entitiesDir;
-        }
-
-        if (strpos($dir, -1) != "/") {
-            $dir .= '/';
+        if ($dirs === null) {
+            $dirs = $this->getDI()->get('config')->get('application')->controllersDir;
         }
 
         $cache = $this->getDI()->get('cache');
-        if ($cache->get('MAPPER_' . md5($dir)) === null) {
+        if ($cache->get('CONTROLLER_' . md5(serialize($dirs))) === null) {
+            $reader = new Memory();
+            foreach ($dirs as $dir) {
+                if (strpos($dir, -1) != "/") {
+                    $dir .= '/';
+                }
+                $rv = array();
+                foreach ($this->_readDir($dir) as $controller) {
+                    $reflector = $reader->get($controller);
+                    foreach (get_class_methods($controller) as $actions) {
+                        if (strpos($actions, 'Action') > 0) {
+                            $rv[$controller][$actions] = array('grid' => false);
+                            $annotations = $reader->getMethod($controller, $actions);
+                            if (count($annotations) > 0) {
+                                foreach ($annotations as $annotation) {
+                                    if ($annotation->getName() == "Grid") {
+                                        $rv[$controller][$actions] = array('grid' => true);
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            $cache->save('CONTROLLER_' . md5(serialize($dirs)), serialize($rv));
+        } else {
+            $rv = unserialize($cache->get('CONTROLLER_' . md5(serialize($dirs))));
+        }
+
+        return $rv;
+    }
+
+    private function _readDir($dir)
+    {
+
+
+        $cache = $this->getDI()->get('cache');
+        if ($cache->get('DIR_' . md5($dir)) === null) {
+
 
             $entities = array();
             $files = scandir($dir);
@@ -252,15 +300,21 @@ class Mapper extends Component
 
                     if ($handle) {
                         while (($line = fgets($handle)) !== false) {
+
                             if (strpos($line, 'namespace') === 0) {
                                 $parts = explode(' ', $line);
                                 $ns = rtrim(trim($parts[1]), ';');
                                 break;
                             }
                         }
+
+
+                        $handle = fopen($dir . $file, "r");
                         while (($line = fgets($handle)) !== false) {
+
                             if (strpos($line, 'class') === 0) {
                                 $parts = explode(' ', $line);
+
                                 $class = rtrim(trim($parts[1]), ';');
                                 break;
                             }
@@ -269,37 +323,107 @@ class Mapper extends Component
                     }
 
 
-                    $entityClass = $ns . '\\' . $class;
-                    /** @var \Phalcon\Mvc\Model $entity */
-                    $entity = new $entityClass();
-                    $schema = $this->getSchemaName($entity->getSchema());
-                    $entities[$entityClass] = array(
-                        'schema' => $schema,
-                        'table' => $entity->getSource(),
-                        'columns' => $this->_describeTable(Entity::getTableNameWithSchema($schema, $entity->getSource()))
-                    );
+                    if ($ns === null AND $class === null) {
+                        continue;
+                    }
+
+
+                    $entities[] = $ns . ($ns ? '\\' : '') . $class;
                 }
-
-
             }
-            $cache->save('MAPPER_' . md5($dir), serialize($entities));
+
+
+            $cache->save('DIR_' . md5($dir), serialize($entities));
         } else {
-            $entities = unserialize($cache->get('MAPPER_' . md5($dir)));
+            $entities = unserialize($cache->get('DIR_' . md5($dir)));
         }
+
 
         return $entities;
     }
 
     /**
+     * read the entity dir and save the array in the cache
+     * @param null|String $dir
+     * @return array
+     */
+    private function _readEntityDir($dir = null)
+    {
+
+        if ($dir === null) {
+            $dir = $this->getDI()->get('config')->get('application')->entitiesDir;
+        }
+
+
+        if (strpos($dir, -1) != "/") {
+            $dir .= '/';
+        }
+
+
+        $cache = $this->getDI()->get('cache');
+        if ($cache->get('ENTITY_' . md5($dir)) === null) {
+
+            $entities = array();
+
+            foreach ($this->_readDir($dir) as $entityClass) {
+                /** @var \Phalcon\Mvc\Model $entity */
+                $entity = new $entityClass();
+                $schema = $this->getSchemaName($entity->getSchema());
+                $columns = $this->_describeTable(Entity::getTableNameWithSchema($schema, $entity->getSource()));
+                $entities[$entityClass] = array(
+                    'relatedFields' => array(),
+                    'primary' => array(),
+                    'schema' => $schema,
+                    'table' => $entity->getSource(),
+                    'columns' => $columns
+                );
+
+
+                if ($entity !== null) {
+                    //add primary keys
+                    foreach ($columns as $k => $column) {
+                        if ($column['key']) {
+                            $entities[$entityClass]['primary'][] = $k;
+                        }
+                    }
+
+
+                    if ($this->modelsManager->getRelations($entityClass)) {
+                        foreach ($this->modelsManager->getRelations($entityClass) as $model) {
+                            $entities[$entityClass]['relations'][$model->getReferencedModel()] = $model;
+                        }
+
+                    }
+
+                    //add related keys
+                    if ($this->modelsManager->getBelongsTo($entity)) {
+                        foreach ($this->modelsManager->getBelongsTo($entity) as $model) {
+                            $entities[$entityClass]['relatedFields'][] = $model->getFields();
+                        }
+
+                    }
+                }
+            }
+            $cache->save('ENTITY_' . md5($dir), serialize($entities));
+        } else {
+            $entities = unserialize($cache->get('ENTITY_' . md5($dir)));
+        }
+
+        return $entities;
+    }
+
+
+    /**
      * @param array $entities
      */
-    private function _buildEntityMapper(array $entities)
+    private
+    function _buildEntityMapper(array $entities)
     {
         foreach ($entities as $entityName => $options) {
             $this->tableToModel[$options['table']] = $entityName;
 
             $entityToTableMapper = new Entity();
-            $entityToTableMapper->setName($entityName)->setTable($options['table'])->setSchema($options['schema'])->setColumns($options['columns']);
+            $entityToTableMapper->setName($entityName)->setTable($options['table'])->setSchema($options['schema'])->setColumns($options['columns'])->setPrimary($options['primary'])->setRelations((isset($options['relations'])?$options['relations']:null))->setRelatedFields($options['relatedFields']);
             $this->addEntity($entityToTableMapper);
         }
     }
@@ -308,7 +432,8 @@ class Mapper extends Component
      * @param String $table
      * @return array
      */
-    private function _describeTable($table)
+    private
+    function _describeTable($table)
     {
         $sourceName = __NAMESPACE__ . "\\Source\\" . ucfirst($this->getDI()->get('db')->getType());
         /** @var \FhpPhalconGrid\Grid\Source\SourceInterface $source */

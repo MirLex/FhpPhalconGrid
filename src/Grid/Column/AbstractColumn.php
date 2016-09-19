@@ -15,6 +15,7 @@ abstract class AbstractColumn
 {
 
     private $sqlRemove = true;
+    private $connectionTable = false;
 
     /**
      * Name of the column
@@ -70,6 +71,17 @@ abstract class AbstractColumn
      * @var null|String
      */
     private $field = null;
+
+
+
+
+    public function getConnectionTable(){
+        return $this->connectionTable;
+    }
+    public function setConnectionTable(ConnectedTable $cTable){
+        $this->connectionTable = $cTable;
+        return $this;
+    }
 
     public function isGroup()
     {
@@ -214,6 +226,11 @@ abstract class AbstractColumn
         return $this->permission->getRules();
     }
 
+    public function setPermission(Permission $permission){
+        $this->permission = $permission;
+        return $this;
+    }
+
 
     /**
      * Column constructor.
@@ -318,6 +335,8 @@ abstract class AbstractColumn
      */
     public function setSqlRemove($sqlRemove)
     {
+        $this->setRemove($sqlRemove);
         $this->sqlRemove = $sqlRemove;
+        return $this;
     }
 }

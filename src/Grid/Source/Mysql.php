@@ -13,6 +13,7 @@ namespace FhpPhalconGrid\Grid\Source;
 use FhpPhalconGrid\Grid\Validator\ArrayValidator;
 use FhpPhalconGrid\Grid\Validator\BetweenValidator;
 use FhpPhalconGrid\Grid\Validator\DateValidator;
+use FhpPhalconGrid\Grid\Validator\FloatValidator;
 use FhpPhalconGrid\Grid\Validator\RequiredValidator;
 use FhpPhalconGrid\Grid\Validator\StringLengthValidator;
 use Phalcon\DiInterface;
@@ -58,6 +59,9 @@ class Mysql extends Plugin implements SourceInterface
                     $this->columns[$column['Field']]['type'] = substr($column['Type'], 0, strpos($column['Type'], '('));
                     $length = $this->extractStringBetween('(', ')', $column['Type']);
                     if (isset($length[0])) {
+                        if (in_array($this->columns[$column['Field']]['type'], array('enum', 'set'))) {
+                            $length[0] = str_replace('\'', '', $length[0]);
+                        }
                         $this->columns[$column['Field']]['length'] = $length[0];
                     }
                 } else {
@@ -114,7 +118,7 @@ class Mysql extends Plugin implements SourceInterface
         //if field is required
         if ($options['nullable'] === false) {
             $validators[] = new RequiredValidator(array(
-                'message' => 'The name is required'
+                'message' => 'The field is required'
             ));
         }
 
@@ -127,7 +131,13 @@ class Mysql extends Plugin implements SourceInterface
             $validators[] = self::_int($type, $options);
         }
 
-        //TODO Float
+        //floats
+        if (in_array($type, array('float', 'decimal', 'double'))) {
+            $validators[] = new FloatValidator(array(
+                'message' => 'The number is invalid!',
+                'allowEmpty' => true
+            ));
+        }
         array('float', 'decimal', 'double');
 
         //strings
@@ -137,7 +147,8 @@ class Mysql extends Plugin implements SourceInterface
             'tinytext',
             'mediumtext',
             'longtext'))) {
-            $validators[] = self::_strings($options);
+
+            $validators[] = self::_strings($type, $options);
         }
 
         //dates
@@ -145,9 +156,14 @@ class Mysql extends Plugin implements SourceInterface
             $validators[] = self::_date($type);
         }
 
-        //TODO array
+        //arrays
         if (in_array($type, array('enum', 'set'))) {
-            $validators[] = self::_array($type);
+            $validators[] = new ArrayValidator(array(
+                'type' => $type,
+                'options' => $options,
+                'message' => 'The value is not allowed!',
+                'allowEmpty' => true
+            ));
         }
 
         return $validators;
@@ -220,22 +236,8 @@ class Mysql extends Plugin implements SourceInterface
 
         return new DateValidator(array(
             'format' => $format,
-            'message' => 'We don\'t like really long names'
-        ));
-    }
-
-    /**
-     * Creates a Date validator
-     * @param $type
-     * @param $options
-     * @return ArrayValidator
-     */
-    private static function _array($type, $options)
-    {
-        return new ArrayValidator(array(
-            'type' => $type,
-            'options' => $options,
-            'message' => 'We don\'t like really long names'
+            'message' => 'Date Format',
+            'allowEmpty' => true
         ));
     }
 
@@ -245,12 +247,29 @@ class Mysql extends Plugin implements SourceInterface
      * @param $options
      * @return StringLength
      */
-    private static function _strings($options)
+    private static function _strings($type, $options)
     {
+
+        //TODO not really correct, 2bytes caracters
+        switch ($type) {
+            case'tinytext':
+                $options['length'] = 255;
+                break;
+            case'text':
+                $options['length'] = 65535;
+                break;
+            case'mediumtext':
+                $options['length'] = 16777215;
+                break;
+            case'longtext':
+                $options['length'] = 4294967295;
+                break;
+        }
+
         return new StringLengthValidator(array(
             'max' => $options['length'],
             'min' => 0,
-            'message' => 'We don\'t like really long names'
+            'message' => 'We don\'t like really long strings(' . $options['length'] . ')'
         ));
     }
 
@@ -292,7 +311,8 @@ class Mysql extends Plugin implements SourceInterface
         return new BetweenValidator(array(
             'minimum' => $min,
             'maximum' => $max,
-            'message' => 'The value must be between ' . $min . ' and ' . $max
+            'message' => 'The value must be between ' . $min . ' and ' . $max,
+            'allowEmpty' => true
         ));
     }
 

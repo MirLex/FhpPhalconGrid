@@ -68,7 +68,9 @@ class Action extends Component
 
         $this->_addTypes(Grid::DETAILS)
             ->_addTypes(Grid::EDIT)
-            ->_addTypes(Grid::DELETE);
+            ->_addTypes(Grid::DELETE)
+            ->_addTypes(Grid::NEWENTRY);
+
     }
 
     /**
@@ -175,7 +177,7 @@ class Action extends Component
      */
     public function getType($type)
     {
-        if (!in_array($type, array(Grid::DETAILS, Grid::EDIT, Grid::DELETE))) {
+        if (!in_array($type, array(Grid::DETAILS, Grid::EDIT, Grid::DELETE, Grid::NEWENTRY))) {
             throw new Exception('This action type "' . $type . '" is not allowed!');
         }
         return $this->types[$type];
@@ -187,7 +189,7 @@ class Action extends Component
      */
     protected function _addTypes($type)
     {
-        $this->types[$type] = new Type($this->getDI());
+            $this->types[$type] = new Type($this->getDI());
         return $this;
     }
 

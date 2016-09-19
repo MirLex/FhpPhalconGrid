@@ -41,6 +41,7 @@ class Permission
     public function allowRemove(Config $remove)
     {
         $this->remove = $remove->getValue();
+        return $this;
     }
 
     /**
@@ -57,6 +58,8 @@ class Permission
     public function allowAdd(Config $add)
     {
         $this->add = $add->getValue();
+        return $this;
+
     }
 
     /**
@@ -73,6 +76,8 @@ class Permission
     public function allowEdit(Config $edit)
     {
         $this->edit = $edit->getValue();
+        return $this;
+
     }
 
 

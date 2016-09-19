@@ -10,9 +10,13 @@
 
 namespace FhpPhalconGrid\Grid;
 
-use FhpPhalconHelper\JsonResponse;
 use FhpPhalconGrid\Grid\Column\Callback;
+use FhpPhalconGrid\Grid\Column\Config;
+use FhpPhalconGrid\Grid\Column\ConnectedTable;
+use FhpPhalconGrid\Grid\Column\FieldType;
 use FhpPhalconGrid\Grid\Column\Group;
+use FhpPhalconGrid\Grid\Column\Permission;
+use FhpPhalconHelper\JsonResponse;
 use Phalcon\DiInterface;
 use Phalcon\Events\EventsAwareInterface;
 use Phalcon\Events\ManagerInterface;
@@ -20,7 +24,7 @@ use Phalcon\Http\Request;
 use Phalcon\Mvc\Model;
 use Phalcon\Mvc\User\Component;
 use Phalcon\Mvc\View;
-//use Phalcon\Paginator\Pager;
+use Phalcon\Paginator\Pager;
 use Phalcon\Text;
 use Phalcon\Validation;
 
@@ -31,6 +35,8 @@ class Grid extends Component implements EventsAwareInterface
     const EDIT = 'edit';
     const DETAILS = 'details';
     const DELETE = 'delete';
+    const NEWENTRY = 'new';
+
 
     const EXPORT_PDF = 'pdf';
     const EXPORT_XLS = 'xls';
@@ -189,7 +195,15 @@ class Grid extends Component implements EventsAwareInterface
         $condition = $this->_createPhqlCondition();
         $modelName = $this->mapper->getModelNameFromAlias($this->query->getFrom());
         /** @var \Phalcon\Mvc\Model $model */
-        $model = $modelName::findFirst($condition);
+        if ($condition == GRID::NEWENTRY) {
+            $model = new $modelName;
+        } else {
+            $model = $modelName::findFirst($condition);
+        }
+
+
+        //transaction start
+        $this->db->begin();
 
         //if entry exists
         if ($model) {
@@ -200,50 +214,78 @@ class Grid extends Component implements EventsAwareInterface
             $postdata = file_get_contents("php://input");
             $request = json_decode($postdata, true);
 
+
+            foreach ($request as $k => $req) {
+                if (is_array($req) AND array_key_exists('date', $req) AND array_key_exists('time', $req)) {
+                    $date = new \DateTime($req['time']);
+                    $request[$k] = $date->format('Y-m-d H:i:s');
+                }
+            }
+
             //get all relation entities of that one
             foreach ($model->getModelsManager()->getRelations($modelName) as $relation) {
                 $relationModelName = $relation->getReferencedModel();
                 $relationAliasName = $relation->getOption('alias');
 
-                //deleting old entries
-                $model->{$relationAliasName}->delete();
+                if ($this->_skipBelongsToAndHasOneRelationsOfFrom($relationModelName)) {
+                    continue;
+                }
+
+                //delete
+                if ($model->{$relationAliasName}) {
+                    $model->{$relationAliasName}->delete();
+                }
 
                 $newEntityObjects = array();
                 foreach ($request[Group::GROUP_PREFIX . $relationAliasName] as $row => $relationValue) {
 
-                    //check if all fields are empty
-                    $allFieldsAreEmpty = true;
-                    foreach ($relationValue as $vl) {
-                        if (!empty($vl)) {
-                            $allFieldsAreEmpty = false;
+                    //TODO Make it better to also add the validators - also the required should be connected to the group
+                    if ($this->getColumnGroup($relationAliasName)->getConnectionTable()) {
+                        $field = array_keys($this->getColumnGroup($relationAliasName)->getColumns());
+                        $values = explode(',', $relationValue);
+                        foreach ($values as $value) {
+                            $tmpModel = new $relationModelName();
+                            $tmpModel->assign(array($field[0] => $value), null, $field);
+                            $newEntityObjects[] = $tmpModel;
+                        }
+                    } else {
+                        //check if all fields are empty
+                        $allFieldsAreEmpty = true;
+                        foreach ($relationValue as $vl) {
+                            if (!empty($vl)) {
+                                $allFieldsAreEmpty = false;
+                            }
+                        }
+
+                        if (!$allFieldsAreEmpty) {
+                            //create new validation and add it to the group messenger
+                            $validation = new Validation();
+                            $relationModelColumns = $this->mapper->getColumnsOfEntity($relationModelName, 'noRemovedColumns');
+                            foreach ($relationModelColumns as $tmpCol) {
+                                $validators = $this->getColumnGroup($relationAliasName)->getColumn($tmpCol)->getValidators();
+                                foreach ($validators as $validator) {
+                                    $validation->add($tmpCol, $validator);
+                                }
+                            }
+                            //validate with the given result
+                            $errors = $validation->validate($relationValue);
+                            //modify the error message field and code to assign the error better in angular later on
+                            if ($errors->count() > 0) {
+                                foreach ($errors as $err) {
+                                    $err->setCode($relationValue[$err->getField()]);
+                                    $err->setField(Group::GROUP_PREFIX . $relationAliasName . '.' . $row . '.' . $err->getField());
+                                    $validError->appendMessage($err);
+                                }
+                            }
+                            //create a model and assign the result
+                            $tmpModel = new $relationModelName();
+
+                            $tmpModel->assign($relationValue, null, $relationModelColumns);
+                            $newEntityObjects[] = $tmpModel;
                         }
                     }
 
-                    if (!$allFieldsAreEmpty) {
-                        //create new validation and add it to the group messenger
-                        $validation = new Validation();
-                        $relationModelColumns = $this->mapper->getColumnsOfEntity($relationModelName, 'noRemovedColumns');
-                        foreach ($relationModelColumns as $tmpCol) {
-                            $validators = $this->getColumnGroup($relationAliasName)->getColumn($tmpCol)->getValidators();
-                            foreach ($validators as $validator) {
-                                $validation->add($tmpCol, $validator);
-                            }
-                        }
-                        //validate with the given result
-                        $errors = $validation->validate($relationValue);
-                        //modify the error message field and code to assign the error better in angular later on
-                        if ($errors->count() > 0) {
-                            foreach ($errors as $err) {
-                                $err->setCode($relationValue[$err->getField()]);
-                                $err->setField(Group::GROUP_PREFIX . $relationAliasName . '.' . $row . '.' . $err->getField());
-                                $validError->appendMessage($err);
-                            }
-                        }
-                        //create a model and assign the result
-                        $tmpModel = new $relationModelName();
-                        $tmpModel->assign($relationValue, null, $relationModelColumns);
-                        $newEntityObjects[] = $tmpModel;
-                    }
+
                 }
                 //assign the group-models to the main model
                 if (count($newEntityObjects) > 0) {
@@ -254,12 +296,15 @@ class Grid extends Component implements EventsAwareInterface
             //get all fields and associate it with the model name
             $modelColumns = $this->mapper->getColumnsOfEntity($model, 'noRemovedColumns');
 
+
             //add the validation
             $validation = new Validation();
             foreach ($modelColumns as $tmpCol) {
                 $validators = $this->getColumn($tmpCol)->getValidators();
                 foreach ($validators as $validator) {
-                    $validation->add($tmpCol, $validator);
+                    if ($validator !== null) {
+                        $validation->add($tmpCol, $validator);
+                    }
                 }
             }
             //modify the error message to assing it better in angular later on
@@ -272,6 +317,7 @@ class Grid extends Component implements EventsAwareInterface
                     }
                 }
             }
+
             //finally save the new entity
             if ($validError->count() == 0 && $model->save($request, $modelColumns) == false) {
                 $this->response->setStatusCode(401);
@@ -280,7 +326,19 @@ class Grid extends Component implements EventsAwareInterface
                     $errors[$message->getField()] = $message->getMessage();
                 }
                 $this->view->{JsonResponse::ERROR} = $errors;
+            } elseif ($validError->count() != 0) {
+                $this->response->setStatusCode(401);
+                $errors = [];
+                foreach ($validError as $message) {
+                    $errors[$message->getField()] = $message->getMessage();
+                }
+
+                //Transaction rollback
+                $this->db->rollback();
+                $this->view->{JsonResponse::ERROR} = $errors;
             } else {
+                //Transaction commit
+                $this->db->commit();
                 $this->view->{JsonResponse::INFO} = JsonResponse::SAVED;
             }
         } else {
@@ -298,6 +356,9 @@ class Grid extends Component implements EventsAwareInterface
             $condition = $this->_createPhqlCondition();
             $modelName = $this->mapper->getModelNameFromAlias($this->query->getFrom());
             /** @var \Phalcon\Mvc\Model $model */
+
+            var_dump($condition);
+            exit;
             $model = $modelName::findFirst($condition);
 
             if ($model) {
@@ -341,6 +402,49 @@ class Grid extends Component implements EventsAwareInterface
         }
     }
 
+    private function _setFieldValues($column){
+        if ($column->getConnectionTable() !== false) {
+            $connectionTable = $column->getConnectionTable();
+            $column->setFieldValue($connectionTable->getFieldValues());
+        }
+    }
+
+    private function _columnHasOneRelation($entity, $col, $col2)
+    {
+
+        $col = Group::getColumnName($col);
+        $relations = $this->mapper->getEntity($entity)->getRelations();
+
+        if(count($relations)>0){
+            foreach ($relations as $relation) {
+                if ($relation->getType() == Model\Relation::HAS_ONE AND $relation->getFields() == $col) {
+                    $col2->setFieldType('enum');
+                    $connection = new ConnectedTable();
+                    $connection->setSourceTable($relation->getReferencedModel())->setSourceField($relation->getReferencedFields());
+                    $col2->setConnectionTable($connection);
+                }
+            }
+        }
+    }
+
+    private function _skipBelongsToAndHasOneRelationsOfFrom($entityName)
+    {
+        $fromRelations = $this->mapper->getEntity($this->query->getFrom())->getRelations();
+        $rv = false;
+
+        foreach ($fromRelations as $relation) {
+            if ($relation->getReferencedModel() == $entityName) {
+                if (in_array($relation->getType(), array(Model\Relation::BELONGS_TO, Model\Relation::HAS_ONE))) {
+                    $rv = true;
+                } else {
+                    return false;
+                }
+            }
+        }
+
+        return $rv;
+    }
+
     /**
      * create all the columns from the builder query
      * @throws Exception
@@ -359,130 +463,241 @@ class Grid extends Component implements EventsAwareInterface
             $this->query = $this->getAction()->createActionColumn($this->query);
         }
 
+        //var_dump('COLUMNS_'.md5($this->query->getFrom()));
+
         //parse the query
         $query = $this->query->getQuery()->parse();
         $this->mapper->addAliasFromQuery($query);
         //column positions
-        $position = 0;
-        $colPosition = 0;
-        $columns = $this->query->getColumns();
-        /** @var \FhpPhalconGrid\Grid\Source\SourceInterface $validator */
-        $validator = __NAMESPACE__ . "\\Source\\" . ucfirst($this->getDI()->get('db')->getType());
 
-        foreach ($query['columns'] as $name => $sqlColumns) {
+        $cache = $this->getDI()->get('cache');
+        if ($cache->get('COLUMNS_' . md5($this->query->getFrom())) === null) {
 
-            $buildColumns = array();
-            $alias = null;
-            $field = null;
-            $tableAlias = null;
-            $type = Column::TYPE_QUERY;
+            $position = 0;
+            $colPosition = 0;
+            $columns = $this->query->getColumns();
+            /** @var \FhpPhalconGrid\Grid\Source\SourceInterface $validator */
+            $validator = __NAMESPACE__ . "\\Source\\" . ucfirst($this->getDI()->get('db')->getType());
 
-            switch ($sqlColumns['type']) {
 
-                //for "select *"
-                case "object":
-                    //needed to map the $query->getColumns() to this array
-                    foreach ($columns as $key => $col) {
-                        if (stristr($col, '*')) {
-                            unset($columns[$key]);
+            foreach ($query['columns'] as $name => $sqlColumns) {
+
+
+                $buildColumns = array();
+                $alias = null;
+                $field = null;
+                $tableAlias = null;
+                $type = Column::TYPE_QUERY;
+
+                switch ($sqlColumns['type']) {
+
+                    //for "select *"
+                    case "object":
+                        //needed to map the $query->getColumns() to this array
+                        foreach ($columns as $key => $col) {
+                            if (stristr($col, '*')) {
+                                unset($columns[$key]);
+                            }
+                        }
+                        $columns = array_values($columns);
+                        $colPosition = $colPosition - 1;
+
+                        $tableAlias = $sqlColumns['column'];
+                        $buildColumns = $this->mapper->getEntity($sqlColumns['model'])->getColumns();
+
+                        break;
+                    //for single columns
+                    case "scalar":
+                        if ($sqlColumns['column']['type'] == "qualified") {
+                            $tableAlias = $sqlColumns['column']['domain'];
+                            $name = $sqlColumns['column']['name'];
+                        }
+
+                        //functions
+                        if ($sqlColumns['column']['type'] == "functionCall") {
+                            $field = (is_string($columns) ? $columns : $columns[$colPosition]);
+                            $type = Column::TYPE_FUNCTION;
+                        }
+
+                        //sub selects
+                        if ($sqlColumns['column']['type'] == "parentheses") {
+                            $type = Column::TYPE_SUBQUERY;
+                            $field = $columns[$colPosition];
+                        }
+
+                        //get the column description
+                        $buildColumns[$name] = array();
+                        if ($type === Column::TYPE_QUERY) {
+                            $buildColumns[$name] = $this->mapper->getEntity($this->mapper->getModelNameFromAlias($tableAlias))->getColumn($name);
+                        }
+
+                        //set alias if its not the same as the column name
+                        if (isset($sqlColumns['balias']) AND $sqlColumns['balias'] != $field) {
+                            $alias = $sqlColumns['balias'];
+                        }
+
+                        break;
+                }
+
+
+                //build the columns
+                foreach ($buildColumns as $fieldName => $column) {
+
+                    //TODO - delete Group
+                    $relationAlias = Group::getRelationAlias($fieldName, 1);
+                    $keys = $this->mapper->getKeysToHideFromModelName($this->mapper->getModelNameFromAlias(($relationAlias) ? $relationAlias : $this->query->getFrom()), 1);
+
+
+                    //TODO create a function for the relations
+                    //TODO create a function to check if its a Group
+
+                    $col = new Column();
+                    $col->setName($fieldName)
+                        ->setType($type)
+                        ->setDefault((isset($column['default']) ? $column['default'] : null))
+                        ->setTable((isset($column['table']) ? $column['table'] : null))
+                        ->setSchema((isset($column['schema']) ? $column['schema'] : null))
+                        ->setTableAlias($tableAlias)
+                        ->setField($field)
+                        ->setAlias($alias);
+
+
+                    //remove id and related fields
+                    if (in_array(($relationAlias) ? Group::getColumnName($fieldName) : $fieldName, $keys)) {
+                        $col->setRemove(true);
+                    }
+
+
+                    if (isset($column['type']) && ($column['type'] == 'enum' || $column['type'] == 'set')) {
+                        $col->setFieldValue($column['length']);
+                    }
+
+                    if (isset($column['type'])) {
+                        $col->setFieldType($column['type'])->setValidator($validator::getValidator($column['type'], $column));
+                        if ($column['type'] == "datetime" || $column['type'] == "timestamp") {
+                            $col->setCallback(array(new Callback(), 'datetime'), Grid::EDIT);
                         }
                     }
-                    $columns = array_values($columns);
-                    $colPosition = $colPosition - 1;
 
-                    $tableAlias = $sqlColumns['column'];
-                    $buildColumns = $this->mapper->getEntity($sqlColumns['model'])->getColumns();
+                    $this->_columnHasOneRelation($this->mapper->getModelNameFromAlias(($relationAlias) ? $relationAlias : $this->query->getFrom()), $fieldName, $col);
 
-                    break;
-                //for single columns
-                case "scalar":
-                    if ($sqlColumns['column']['type'] == "qualified") {
-                        $tableAlias = $sqlColumns['column']['domain'];
-                        $name = $sqlColumns['column']['name'];
+                    //add Callback to the action field and remove it from the details and edit view
+                    if ($fieldName == Action::COLUMNALIAS) {
+                        $col->setCallback(array(new \FhpPhalconGrid\Grid\Action\Callback(), 'render'), Grid::TABLE);
+                        $col->setRemove(true, array(), Grid::DETAILS);
+                        $col->setRemove(true, array(), Grid::EDIT);
                     }
 
-                    //functions
-                    if ($sqlColumns['column']['type'] == "functionCall") {
-                        $field = (is_string($columns) ? $columns : $columns[$colPosition]);
-                        $type = Column::TYPE_FUNCTION;
-                    }
+                    //Create the Group fields and modify the columns to correct them
+                    if (Text::startsWith($alias, Group::GROUP_PREFIX)) {
+                        $relationAlias = Group::getRelationAlias($alias);
 
-                    //sub selects
-                    if ($sqlColumns['column']['type'] == "parentheses") {
-                        $type = Column::TYPE_SUBQUERY;
-                        $field = $columns[$colPosition];
-                    }
+                        //TODO put it into own
+                        $test = $this->mapper->getModelNameFromAlias(Group::getRelationAlias($alias, true));
 
-                    //get the column description
-                    $buildColumns[$name] = array();
-                    if ($type === Column::TYPE_QUERY) {
-                        $buildColumns[$name] = $this->mapper->getEntity($this->mapper->getModelNameFromAlias($tableAlias))->getColumn($name);
-                    }
 
-                    //set alias if its not the same as the column name
-                    if (isset($sqlColumns['balias']) AND $sqlColumns['balias'] != $field) {
-                        $alias = $sqlColumns['balias'];
-                    }
+                        //use it when its a belongto table
+                        if ($this->_skipBelongsToAndHasOneRelationsOfFrom($test)) {
+                            $col->setSqlRemove(true);
+                        }
 
-                    break;
+                        if (!isset($this->columns[$relationAlias])) {
+
+                            $relations = $this->modelsManager->getBelongsTo(new $test);
+
+                            $this->columns[$relationAlias] = new Group();
+                            $this->columns[$relationAlias]->setPosition($position++);
+                            $this->columns[$relationAlias]->setField(Group::getRelationAlias($alias, true));
+                            $this->columns[$relationAlias]->setName(Group::getRelationAlias($alias, true));
+
+
+                            //TODO put it into own
+                            $test = $this->mapper->getModelNameFromAlias(Group::getRelationAlias($alias, true));
+                            $relations = $this->modelsManager->getBelongsTo(new $test);
+
+
+                            $rel = $this->mapper->getEntity($this->query->getFrom())->getRelations();
+
+                            if (count($relations) == 2) {
+                                $hasFromTable = false;
+                                $relatedArr = array();
+                                foreach ($relations as $relation) {
+                                    if ($relation->getReferencedModel() == $this->query->getFrom() &&
+                                        $relation->getFields() == $rel[$test]->getReferencedFields()
+                                    ) { //and from table related field
+                                        $hasFromTable = true;
+                                    } else {
+                                        $relatedArr = new ConnectedTable();
+                                        $relatedArr->setAlias($relation->getOptions()['alias'])
+                                            ->setConnectedFromField($rel[$test]->getReferencedFields())
+                                            ->setConnectedField($rel[$test]->getFields())
+                                            ->setConnectedTable($test)
+                                            ->setSourceTable($relation->getReferencedModel())
+                                            ->setConnectedToField($relation->getFields())
+                                            ->setSourceField($relation->getReferencedFields());
+                                    }
+                                }
+                                //related table
+                                if ($hasFromTable == true && count($relatedArr) > 0) {
+                                    $this->columns[$relationAlias]->setConnectionTable($relatedArr);
+                                }
+                            }
+                            //add a group callback for a better handling in angular
+                            $this->columns[$relationAlias]->setCallback(array(new Callback(), 'groupRender'));
+                        }
+                        $cTable = $this->columns[$relationAlias]->getConnectionTable();
+
+
+                        $col->setModelName($this->mapper->getModelNameFromAlias(Group::getRelationAlias($alias, true)));
+
+                        //TODO check if its added automatically and not manually - then it will not work
+                        $groupColumn = $this->mapper->getEntity($this->mapper->getModelNameFromAlias(Group::getRelationAlias($alias, true)))->getColumn(str_replace(Group::getRelationAlias($alias) . Group::SPLIT, '', $fieldName));
+                        if (isset($groupColumn['type'])) {
+
+                            if ($col->getFieldType() == null) {
+                                $col->setFieldType($groupColumn['type'])->setValidator($validator::getValidator($groupColumn['type'], $groupColumn));
+                            }
+
+                            if ($groupColumn['type'] == "datetime" || $groupColumn['type'] == "timestamp") {
+                                $col->setCallback(array(new Callback(), 'datetime'), Grid::EDIT);
+                            }
+
+                            if ($groupColumn['type'] == 'enum' || $groupColumn['type'] == 'set') {
+                                $col->setFieldValue($groupColumn['length']);
+                            }
+                        }
+
+                        //TODO put it to a own method
+                        if ($cTable) {
+                            if ($relationAlias . '__' . $cTable->getConnectedToField() != $fieldName) {
+                                continue;
+                            } else {
+                                $col->setRemove(false);
+                                $col->setFieldType('set');
+
+                                $permission = new Permission();
+                                $config = new Config(false, array());
+                                $permission->allowAdd($config)->allowRemove($config);
+                                $this->columns[$relationAlias]->setPermission($permission);
+                            }
+                        }
+
+
+                        $this->columns[$relationAlias]->addColumn($col);
+                    } else {
+                        $col->setPosition($position++)
+                            ->setModelName($this->mapper->getModelNameFromTable($col->getTable()))
+                            ->build();
+                        $this->columns[$col->getAliasOrField()] = $col;
+                    }
+                }
+                $colPosition++;
             }
-
-            //build the columns
-            foreach ($buildColumns as $fieldName => $column) {
-
-                $col = new Column();
-                $col->setName($fieldName)
-                    ->setType($type)
-                    ->setDefault((isset($column['default']) ? $column['default'] : null))
-                    ->setTable((isset($column['table']) ? $column['table'] : null))
-                    ->setSchema((isset($column['schema']) ? $column['schema'] : null))
-                    ->setTableAlias($tableAlias)
-                    ->setField($field)
-                    ->setAlias($alias);
-                if (isset($column['type'])) {
-                    $col->setFieldType($column['type'])->setValidator($validator::getValidator($column['type'], $column));
-                }
-
-                //add Callback to the action field and remove it from the details and edit view
-                if ($fieldName == Action::COLUMNALIAS) {
-                    $col->setCallback(array(new \FhpPhalconGrid\Grid\Action\Callback(), 'render'), Grid::TABLE);
-                    $col->setRemove(true, array(), Grid::DETAILS);
-                    $col->setRemove(true, array(), Grid::EDIT);
-                }
-
-                //Create the Group fields and modify the columns to correct them
-                if (Text::startsWith($alias, Group::GROUP_PREFIX)) {
-                    $relationAlias = Group::getRelationAlias($alias);
-
-
-                    if (!isset($this->columns[$relationAlias])) {
-                        $this->columns[$relationAlias] = new Group();
-                        $this->columns[$relationAlias]->setPosition($position++);
-                        $this->columns[$relationAlias]->setField(Group::getRelationAlias($alias, true));
-                        $this->columns[$relationAlias]->setName(Group::getRelationAlias($alias, true));
-
-                        //add a group callback for a better handling in angular
-                        $this->columns[$relationAlias]->setCallback(array(new Callback(), 'groupRender'));
-                    }
-                    $col->setModelName($this->mapper->getModelNameFromAlias(Group::getRelationAlias($alias, true)));
-
-                    //TODO check if its added automatically and not manually - then it will not work
-                    $groupColumn = $this->mapper->getEntity($this->mapper->getModelNameFromAlias(Group::getRelationAlias($alias, true)))->getColumn(str_replace(Group::getRelationAlias($alias) . Group::SPLIT, '', $fieldName));
-                    if (isset($groupColumn['type'])) {
-                        $col->setFieldType($groupColumn['type'])->setValidator($validator::getValidator($groupColumn['type'], $groupColumn));
-                    }
-
-                    $this->columns[$relationAlias]->addColumn($col);
-                } else {
-                    $col->setPosition($position++)
-                        ->setModelName($this->mapper->getModelNameFromTable($col->getTable()))
-                        ->build();
-                    $this->columns[$col->getAliasOrField()] = $col;
-                }
-            }
-
-            $colPosition++;
+            $cache->save('COLUMNS_' . md5($this->query->getFrom()), serialize($this->columns));
+        } else {
+            $this->columns = unserialize($cache->get('COLUMNS_' . md5($this->query->getFrom())));
         }
+
     }
 
     /**
@@ -496,14 +711,27 @@ class Grid extends Component implements EventsAwareInterface
 
     protected function columnCallbacks($callbacks)
     {
+
         foreach ($callbacks as $field => $callback) {
             if ($callback === false) {
                 continue;
             }
-            if (!is_callable($callback)) {
-                throw new Exception('The callback is not callable!');
+
+            //check if group
+            if (Text::startsWith($field, Group::GROUP_PREFIX)) {
+                foreach ($callback as $groupColumnName => $groupColumnCallback) {
+                    if ($groupColumnName == "groupCallback") {
+                        $this->result['items'] = call_user_func($groupColumnCallback, $field, null, $this);
+                    } else {
+                        $this->result['items'] = call_user_func($groupColumnCallback, $groupColumnName, $field, $this);
+                    }
+                }
+            } else {
+                if (!is_callable($callback)) {
+                    throw new Exception('The callback is not callable!');
+                }
+                $this->result['items'] = call_user_func($callback, $field, null, $this);
             }
-            $this->result['items'] = call_user_func($callback, $field, $this);
         }
     }
 
@@ -528,8 +756,6 @@ class Grid extends Component implements EventsAwareInterface
             //sort columns
             uasort($this->columns, 'FhpPhalconGrid\Grid\Grid::_sortingColumns');
 
-            $this->_getHeadInformation();
-
             $col = array();
             $callbacks = array();
             /** @var Column $column */
@@ -547,19 +773,41 @@ class Grid extends Component implements EventsAwareInterface
                     if ($column->getCallback()) {
                         $callbacks[$column->getAliasOrField()] = $column->getCallback();
                     }
+                    $this->_setFieldValues($column);
                 }
 
                 //Create a subselect if its a group
                 if (is_a($column, 'FhpPhalconGrid\Grid\Column\Group')) {
-                    //sort columns
-                    $relation = $this->modelsManager->getRelationByAlias($this->query->getFrom(), $column->getField());
-                    $col[] = '(SELECT GROUP_CONCAT(CONCAT(' . implode(',"' . $column->getColumnSeparator() . '",', array_keys($column->getColumnsForSelect())) . '),"' . $column->getLineSeparator() . '") FROM ' . $relation->getReferencedModel() . ' WHERE ' . $this->mapper->getEntity($this->query->getFrom())->getPhqlName() . '.' . $relation->getFields() . ' = ' . $relation->getReferencedModel() . '.' . $relation->getReferencedFields() . ') as ' . $column->getAliasOrField();
-                    $callbacks[$column->getAliasOrField()] = $column->getCallback();
-                    //TODO Callbacks per field
+                    //Just a connection table relation
+                    if ($column->getConnectionTable() !== false) {
+                        $cTable = $column->getConnectionTable();
+                        $cTableCol = $column->getColumn($cTable->getConnectedToField());
+                        $col[] = '(SELECT GROUP_CONCAT(' . $this->mapper->getEntity($cTable->getConnectedTable())->getPhqlName() . '.' . $cTable->getConnectedToField() . ') FROM ' . $cTable->getConnectedTable() . ' WHERE ' . $this->mapper->getEntity($this->query->getFrom())->getPhqlName() . '.' . $cTable->getConnectedField() . ' = ' . $cTable->getConnectedTable() . '.' . $cTable->getConnectedFromField() . ') as ' . $column->getAliasOrField();
+                        $callbacks[$column->getAliasOrField()]['groupCallback'] = $column->getCallback();
+                        $cTableCol->setFieldValue($cTable->getFieldValues());
+
+                        if ($cTableCol->getCallback()) {
+                            $callbacks[$column->getAliasOrField()][$cTableCol->getAliasOrField()] = $cTableCol->getCallback();
+                        }
+                    } else {
+                        //IF all the columns are removed or its just a connection entity
+                        // if(count($column->getColumnsForSelect())>0){
+                        $relation = $this->modelsManager->getRelationByAlias($this->query->getFrom(), $column->getField());
+                        $col[] = '(SELECT GROUP_CONCAT(CONCAT(IFNULL(' . implode(',""),"' . $column->getColumnSeparator() . '",IFNULL(', array_keys($column->getColumnsForSelect())) . ',"")),"' . $column->getLineSeparator() . '") FROM ' . $relation->getReferencedModel() . ' WHERE ' . $this->mapper->getEntity($this->query->getFrom())->getPhqlName() . '.' . $relation->getFields() . ' = ' . $relation->getReferencedModel() . '.' . $relation->getReferencedFields() . ') as ' . $column->getAliasOrField();
+                        $callbacks[$column->getAliasOrField()]['groupCallback'] = $column->getCallback();
+                        foreach ($column->getColumns() as $tkey => $tCol) {
+                            $this->_setFieldValues($tCol);
+                            if ($tCol->getCallback()) {
+                                $callbacks[$column->getAliasOrField()][$tCol->getAliasOrField()] = $tCol->getCallback();
+                            }
+                        }
+                    }
                 }
             }
-
             $this->query->columns(implode(',', $col));
+
+            $this->_getHeadInformation();
+
 
             if (self::getMode() == Grid::DETAILS OR self::getMode() == Grid::EDIT) {
                 $this->_createWhere();
@@ -570,7 +818,6 @@ class Grid extends Component implements EventsAwareInterface
                 $this->setFilter();
                 $result = $this->getPagination()->setQuery($this->query, $this->getUrlParam(Grid::URL_PARAMS_PAGINATION))->getResult();
             }
-
             $this->result = $result;
             $this->columnCallbacks($callbacks);
             //$this->getEventsManager()->fire("grid:afterQuery", $this, $result);
@@ -605,8 +852,7 @@ class Grid extends Component implements EventsAwareInterface
                 $having .= $field . ' LIKE ' . $db->escapeString('%' . $value . '%');
             }
         }
-
-
+        
         if ($where != '') {
             $this->query->where($where, $whereBinds);
         }
@@ -704,6 +950,10 @@ class Grid extends Component implements EventsAwareInterface
             $condition['conditions'] = $and . $k . ' = :' . $i . ':';
             $condition['bind'][$i] = $params;
             $i++;
+
+            if ($params == GRID::NEWENTRY) {
+                return $params;
+            }
         }
         return $condition;
     }
@@ -713,6 +963,7 @@ class Grid extends Component implements EventsAwareInterface
     {
 //TODO combine it with setFilter
         if ($this->getAction()->getLinkParams()) {
+
             //TODO Check if where or Having
             //TODO check Bind type
             $i = 0;
@@ -728,6 +979,7 @@ class Grid extends Component implements EventsAwareInterface
 
                 $i++;
             }
+
         }
 
     }
@@ -787,9 +1039,11 @@ class Grid extends Component implements EventsAwareInterface
                     'displayName' => $column->getName(),
                     'sortable' => $column->isSortable(),
                     'hidden' => $column->isHidden(),
-                    'filterable' => $column->isFilterable()
+                    'filterable' => $column->isFilterable(),
+
                 );
             } else {
+
                 $data[$column->getAliasOrField()] = array(
                     'displayName' => $column->getName(),
                     'sortable' => $column->isSortable(),
@@ -797,25 +1051,30 @@ class Grid extends Component implements EventsAwareInterface
                     'filterable' => $column->isFilterable()
                 );
 
+                if ($column->isGroup()) {
+                    $data[$column->getAliasOrField()]['connectionTable'] = ($column->getConnectionTable() ? true : false);
+                }
+
+
                 if ($this->getMode() == "edit") {
                     $data[$column->getAliasOrField()]['permission'] = $column->getPermission();
                 }
             }
 
-
             if (!$column->isGroup()) {
-                //TODO make better
-                if ($this->getMode() == "edit") {
-                    if ($group !== null) {
-                        $data[$group]['fields'][$column->getAliasOrField()]['fieldType'] = $column->getFieldTypeAjax();
-                        $data[$group]['fields'][$column->getAliasOrField()]['validators'] = $column->getValidatorsAjax();
-                    } else {
-                        $data[$column->getAliasOrField()]['fieldType'] = $column->getFieldTypeAjax();
-                        $data[$column->getAliasOrField()]['validators'] = $column->getValidatorsAjax();
-                    }
+                //TODO make better - fieldType only in grid till filter is there
+                //if ($this->getMode() == "edit") {
+                if ($group !== null) {
+                    $data[$group]['fields'][$column->getAliasOrField()]['fieldType'] = $column->getFieldTypeAjax();
+                    $data[$group]['fields'][$column->getAliasOrField()]['fieldValue'] = $column->getFieldValue();
+                    $data[$group]['fields'][$column->getAliasOrField()]['validators'] = $column->getValidatorsAjax();
+                } else {
+                    $data[$column->getAliasOrField()]['fieldType'] = $column->getFieldTypeAjax();
+                    $data[$column->getAliasOrField()]['fieldValue'] = $column->getFieldValue();
+                    $data[$column->getAliasOrField()]['validators'] = $column->getValidatorsAjax();
                 }
+                //}
             } else {
-
                 $data = $this->_createHeadInformationArray($data, $column->getColumns(), $table);
             }
         }

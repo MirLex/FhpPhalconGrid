@@ -18,7 +18,7 @@ class Callback
      * @param \FhpPhalconGrid\Grid\Grid $grid
      * @return Array
      */
-    static public function render($field, $grid)
+    static public function render($field,$group, $grid)
     {
 
         $results =$grid->getResult();

@@ -72,6 +72,8 @@ class Column extends AbstractColumn
      */
     private $validator = null;
     private $fieldType = null;
+    private $fieldValue = null;
+
 
     /**
      * helper to check if build() was already called
@@ -79,6 +81,27 @@ class Column extends AbstractColumn
      */
     private $build = false;
 
+
+    /**
+     * @return String
+     */
+    public function setFieldValue($fieldValue)
+    {
+        if(!is_array($fieldValue)){
+            $fieldValue = explode(',',str_replace('\'','',$fieldValue));
+            $fieldValue = array_combine($fieldValue, $fieldValue);
+        }
+        $this->fieldValue = $fieldValue;
+        return $this;
+    }
+
+    /**
+     * @return null|Array
+     */
+    public function getFieldValue()
+    {
+        return $this->fieldValue;
+    }
 
     /**
      * @return String
@@ -92,7 +115,8 @@ class Column extends AbstractColumn
     /**
      * @return Permission
      */
-    public function getPermission(){
+    public function getPermission()
+    {
         return $this->permission->getRules('onlyEdit');
     }
 
@@ -121,7 +145,7 @@ class Column extends AbstractColumn
      */
     public function getFieldTypeAjax()
     {
-        if(empty($this->fieldType)){
+        if (empty($this->fieldType)) {
             return false;
         }
 
@@ -160,7 +184,7 @@ class Column extends AbstractColumn
             case "tinytext":
             case "mediumtext":
             case "longtext":
-                $type = "text";
+                $type = "textarea";
                 break;
             case "enum":
                 $type = "select";
@@ -169,7 +193,7 @@ class Column extends AbstractColumn
                 $type = "multiselect";
                 break;
             default:
-                throw new Exception('The db field type "'.$this->fieldType.'" is unknown!');
+                throw new Exception('The db field type "' . $this->fieldType . '" is unknown!');
                 break;
 
         }
@@ -261,6 +285,9 @@ class Column extends AbstractColumn
         $validators = array();
         if (is_array($this->validator) AND count($this->validator) > 0) {
             foreach ($this->validator as $name => $validator) {
+                if ($validator === null) {
+                    continue;
+                }
                 $arr = explode('\\', get_class($validator));
                 $validators[array_pop($arr)] = $validator->getOptions();
             }

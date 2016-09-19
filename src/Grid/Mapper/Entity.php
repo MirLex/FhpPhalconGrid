@@ -37,10 +37,75 @@ class Entity
     private $aliases;
 
     /**
+     * primary keys of that table
+     * @var array $primary
+     */
+    private $primary;
+
+    /**
+     * related keys of that table
+     * @var array $relatedFields
+     */
+    private $relatedFields;
+
+    private $relations;
+
+    /**
+     * @return mixed
+     */
+    public function getRelations()
+    {
+        return $this->relations;
+    }
+
+    /**
+     * @param mixed $relations
+     */
+    public function setRelations($relations)
+    {
+        $this->relations = $relations;
+        return $this;
+    }
+
+    /**
      * All columns of that table
      * @var array $columns
      */
     private $columns = array();
+
+    /**
+     * @return String
+     */
+    public function setRelatedFields($relatedFields)
+    {
+        $this->relatedFields = $relatedFields;
+        return $this;
+    }
+
+    /**
+     * @return String
+     */
+    public function getRelatedFields()
+    {
+        return $this->relatedFields;
+    }
+
+    /**
+     * @return String
+     */
+    public function setPrimary($primary)
+    {
+        $this->primary =$primary;
+        return $this;
+    }
+
+    /**
+     * @return String
+     */
+    public function getPrimary()
+    {
+        return $this->primary;
+    }
 
     /**
      * @return String

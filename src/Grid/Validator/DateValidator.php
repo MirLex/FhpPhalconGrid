@@ -19,6 +19,9 @@ class DateValidator extends ValidatorAbstract
 
     public function validate(Validation $validator, $attribute)
     {
+        if($this->getOption('allowEmpty')===true && $validator->getValue($attribute)==null){
+            return true;
+        }
         $date = date_parse_from_format($this->getOption('format'), $validator->getValue($attribute));
         if (($date['error_count'] + $date['warning_count']) > 0) {
             $message = $this->getOption('message');

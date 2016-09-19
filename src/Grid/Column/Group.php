@@ -10,15 +10,16 @@
 
 namespace FhpPhalconGrid\Grid\Column;
 
+use Phalcon\Text;
+
 class Group extends AbstractColumn
 {
     const GROUP_PREFIX = 'group__';
     const SPLIT = '__';
 
-    private $columnSeparator = ',';
+    private $columnSeparator = '_,_';
     private $lineSeparator = '</br>';
     private $group = true;
-
     private $columns = array();
     private $lastPosition = 0;
 
@@ -27,10 +28,21 @@ class Group extends AbstractColumn
         return self::GROUP_PREFIX . $this->getName();
     }
 
+    public function isRemove($mode = null)
+    {
+        foreach($this->getColumns() as $column){
+            if(!$column->isRemove($mode)){
+                return false;
+            }
+        }
+        return true;
+    }
+
     public function isGroup()
     {
         return $this->group;
     }
+
 
     public function getColumns(){
         return $this->columns;
@@ -87,6 +99,7 @@ class Group extends AbstractColumn
     }
 
 
+
     /**
      * Helper to creates a string with the format PREFIX.relation name.SPLIT.column name
      * @param $relationAlias
@@ -106,6 +119,11 @@ class Group extends AbstractColumn
      */
     static public function getRelationAlias($aliasName, $withoutPrefix = false)
     {
+
+        if (!Text::startsWith($aliasName, Group::GROUP_PREFIX)) {
+            return false;
+        }
+
         if ($withoutPrefix !== false) {
             return substr($aliasName, strlen(self::GROUP_PREFIX), strrpos($aliasName, self::SPLIT) - strlen(self::GROUP_PREFIX));
         }
@@ -119,6 +137,9 @@ class Group extends AbstractColumn
      */
     static public function getColumnName($aliasName)
     {
+        if(!strpos($aliasName,self::SPLIT)){
+            return $aliasName;
+        }
         return substr($aliasName, strrpos($aliasName, self::SPLIT) + strlen(self::SPLIT));
     }
 
