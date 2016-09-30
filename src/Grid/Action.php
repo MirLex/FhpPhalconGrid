@@ -10,6 +10,7 @@
 
 namespace FhpPhalconGrid\Grid;
 
+use FhpPhalconAuth\Service\Route;
 use FhpPhalconGrid\Grid\Action\Exception;
 use FhpPhalconGrid\Grid\Action\Type;
 use FhpPhalconGrid\Helper\Router;
@@ -66,10 +67,10 @@ class Action extends Component
             }
         }
 
-        $this->_addTypes(Grid::DETAILS)
-            ->_addTypes(Grid::EDIT)
-            ->_addTypes(Grid::DELETE)
-            ->_addTypes(Grid::NEWENTRY);
+        $this->addType(Grid::DETAILS)->setName(ucfirst(Grid::DETAILS))->setIcon('details')->setPostion(1);
+        $this->addType(Grid::EDIT)->setName(ucfirst(Grid::EDIT))->setIcon('mode_edit')->setPostion(2);
+        $this->addType(Grid::DELETE)->setName(ucfirst(Grid::DELETE))->setIcon('delete')->setPostion(3);
+        $this->addType(Grid::NEW)->setName(ucfirst(Grid::NEW))->setIcon('add');
 
     }
 
@@ -95,7 +96,7 @@ class Action extends Component
 
     /**
      * get link pattern
-     * @param bool 
+     * @param bool
      * @return array
      */
     public function getLinkPattern($angular = false)
@@ -109,18 +110,27 @@ class Action extends Component
                 $options = array('for' => $type->getForUrl(), Grid::MODE => $mode);
                 $i = 0;
                 foreach ($this->params as $k => $param) {
-                    $options[$k] = ':'.$i.':' ;
+                    $options[$k] = ':' . $i . ':';
 
-                    if($angular===true){
-                        $key = explode('.',$k);
-                        $options[$k] = ':'.$key[1];
+                    if ($angular === true) {
+                        $key = explode('.', $k);
+                        $options[$k] = ':' . $key[1];
                     }
                     $i++;
                 }
 
-                $links[$mode] = $url->get($options);
+                $links[$mode]['type'] = $mode;
+                $links[$mode]['url'] = $url->get($options);
+                $links[$mode]['icon'] = $type->getIcon();
+                $links[$mode]['displayName'] = $type->getName();
+                $links[$mode]['position'] = $type->getPostion();
+
+
+
+
             }
         }
+
         return $links;
     }
 
@@ -177,7 +187,7 @@ class Action extends Component
      */
     public function getType($type)
     {
-        if (!in_array($type, array(Grid::DETAILS, Grid::EDIT, Grid::DELETE, Grid::NEWENTRY))) {
+        if (!in_array($type, array(Grid::DETAILS, Grid::EDIT, Grid::DELETE, Grid::NEW))) {
             throw new Exception('This action type "' . $type . '" is not allowed!');
         }
         return $this->types[$type];
@@ -185,12 +195,12 @@ class Action extends Component
 
     /**
      * @param String $type
-     * @return $this
+     * @return Type
      */
-    protected function _addTypes($type)
+    public function addType($type)
     {
-            $this->types[$type] = new Type($this->getDI());
-        return $this;
+        $this->types[$type] = new Type($this->getDI());
+        return $this->types[$type];
     }
 
     /**
@@ -269,14 +279,12 @@ class Action extends Component
         $params = array_merge($defaultConfig, $this->params);
 
 
-
-        $helper = new Router();
+        $helper = new Route();
         $routeId = $helper->getRouteByControllerAndActionAndParam($dispatcher->getControllerName(), $dispatcher->getActionName());
 
         /** @var \Phalcon\Mvc\Router $router */
         $router = $this->getDI()->get('router');
         $route = $router->getRouteById($routeId);
-
 
         $route->reConfigure(str_replace('/:params', '', $route->getPattern()) . str_repeat('/([a-zA-Z0-9\_\-]+)', count($params) - 2), $params);
         $route->setName(self::ROUTE);

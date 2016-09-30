@@ -10,6 +10,7 @@
 
 namespace FhpPhalconGrid\Grid\Column;
 
+use FhpPhalconGrid\Grid\Grid;
 use Phalcon\Text;
 
 class Group extends AbstractColumn
@@ -25,11 +26,15 @@ class Group extends AbstractColumn
 
     public function getAliasOrField()
     {
-        return self::GROUP_PREFIX . $this->getName();
+        return self::GROUP_PREFIX . $this->getField();
     }
 
     public function isRemove($mode = null)
     {
+        if(parent::isRemove() === true){
+            return true;
+        }
+        
         foreach($this->getColumns() as $column){
             if(!$column->isRemove($mode)){
                 return false;
@@ -93,6 +98,7 @@ class Group extends AbstractColumn
             ->setAlias($name)
             ->setPosition($this->lastPosition++)
             ->build();
+
 
         $this->columns[$name] = $column;
         return $this;

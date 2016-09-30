@@ -15,6 +15,62 @@ use FhpPhalconGrid\Grid\Action;
 class Type
 {
 
+    private $name = null;
+
+    private $postion = 10;
+
+    /**
+     * @return null
+     */
+    public function getPostion()
+    {
+        return $this->postion;
+    }
+
+    /**
+     * @param null $postion
+     */
+    public function setPostion($postion)
+    {
+        $this->postion = $postion;
+        return $this;
+    }
+
+    /**
+     * @return null
+     */
+    public function getName()
+    {
+        return $this->name;
+    }
+
+    /**
+     * @param null $name
+     */
+    public function setName($name)
+    {
+        $this->name = $name;
+        return $this;
+    }
+
+    /**
+     * @return null
+     */
+    public function getIcon()
+    {
+        return $this->icon;
+    }
+
+    /**
+     * @param null $icon
+     */
+    public function setIcon($icon)
+    {
+        $this->icon = $icon;
+        return $this;
+
+    }
+    private $icon = null;
     /**
      * set if a action is visible or not
      * @var bool
@@ -26,12 +82,6 @@ class Type
      * @var String
      */
     private $forUrl = Action::ROUTE;
-
-    /**
-     * a different image can be set
-     * @var String
-     */
-    private $image = null;
 
     /**
      * Behaviors for delete
@@ -73,22 +123,6 @@ class Type
     {
         $this->forUrl = $forUrl;
         return $this;
-    }
-
-    /**
-     * @return String
-     */
-    public function getImage()
-    {
-        return $this->image;
-    }
-
-    /**
-     * @param String $image
-     */
-    public function setImage($image)
-    {
-        $this->image = $image;
     }
 
     public function addBehavior($behavior){

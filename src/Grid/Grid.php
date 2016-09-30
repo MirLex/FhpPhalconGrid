@@ -35,7 +35,7 @@ class Grid extends Component implements EventsAwareInterface
     const EDIT = 'edit';
     const DETAILS = 'details';
     const DELETE = 'delete';
-    const NEWENTRY = 'new';
+    const NEW = 'new';
 
 
     const EXPORT_PDF = 'pdf';
@@ -138,7 +138,7 @@ class Grid extends Component implements EventsAwareInterface
      * @return $this
      * @throws Exception
      */
-    public function setSource($source)
+    public function setSource($source,$where = null)
     {
 
 
@@ -157,6 +157,9 @@ class Grid extends Component implements EventsAwareInterface
         //create query of a entity
         if (is_a($source, '\Phalcon\Mvc\Model')) {
             $source = $this->_buildQuery($source);
+            if($where!=null){
+                $source->where($where);
+            }
         }
         $this->query = $source;
 
@@ -183,7 +186,6 @@ class Grid extends Component implements EventsAwareInterface
      */
     protected function _save()
     {
-
         //Creating validation error message group
         $validError = new Validation\Message\Group();
 
@@ -195,12 +197,11 @@ class Grid extends Component implements EventsAwareInterface
         $condition = $this->_createPhqlCondition();
         $modelName = $this->mapper->getModelNameFromAlias($this->query->getFrom());
         /** @var \Phalcon\Mvc\Model $model */
-        if ($condition == GRID::NEWENTRY) {
+        if ($condition == GRID::NEW) {
             $model = new $modelName;
         } else {
             $model = $modelName::findFirst($condition);
         }
-
 
         //transaction start
         $this->db->begin();
@@ -214,8 +215,12 @@ class Grid extends Component implements EventsAwareInterface
             $postdata = file_get_contents("php://input");
             $request = json_decode($postdata, true);
 
-
             foreach ($request as $k => $req) {
+
+                if(is_string($req)){
+                    $request[$k] = trim($req);
+                }
+
                 if (is_array($req) AND array_key_exists('date', $req) AND array_key_exists('time', $req)) {
                     $date = new \DateTime($req['time']);
                     $request[$k] = $date->format('Y-m-d H:i:s');
@@ -227,71 +232,92 @@ class Grid extends Component implements EventsAwareInterface
                 $relationModelName = $relation->getReferencedModel();
                 $relationAliasName = $relation->getOption('alias');
 
-                if ($this->_skipBelongsToAndHasOneRelationsOfFrom($relationModelName)) {
+                if ($this->_skipBelongsToAndHasOneRelationsOfFrom($relationModelName) || $this->getColumnGroup($relationAliasName)->isRemove()) {
                     continue;
                 }
 
-                //delete
+                //delete when group is shown
                 if ($model->{$relationAliasName}) {
                     $model->{$relationAliasName}->delete();
                 }
 
                 $newEntityObjects = array();
-                foreach ($request[Group::GROUP_PREFIX . $relationAliasName] as $row => $relationValue) {
+                if (isset($request[Group::GROUP_PREFIX . $relationAliasName])) {
+                    foreach ($request[Group::GROUP_PREFIX . $relationAliasName] as $row => $relationValue) {
 
-                    //TODO Make it better to also add the validators - also the required should be connected to the group
-                    if ($this->getColumnGroup($relationAliasName)->getConnectionTable()) {
-                        $field = array_keys($this->getColumnGroup($relationAliasName)->getColumns());
-                        $values = explode(',', $relationValue);
-                        foreach ($values as $value) {
-                            $tmpModel = new $relationModelName();
-                            $tmpModel->assign(array($field[0] => $value), null, $field);
-                            $newEntityObjects[] = $tmpModel;
-                        }
-                    } else {
-                        //check if all fields are empty
-                        $allFieldsAreEmpty = true;
-                        foreach ($relationValue as $vl) {
-                            if (!empty($vl)) {
-                                $allFieldsAreEmpty = false;
+                        //TODO Make it better to also add the validators - also the required should be connected to the group
+                        if ($this->getColumnGroup($relationAliasName)->getConnectionTable()) {
+                            $field = array_keys($this->getColumnGroup($relationAliasName)->getColumns());
+
+
+                            $values = explode(',', $relationValue);
+                            foreach ($values as $value) {
+                                $tmpModel = new $relationModelName();
+                                $tmpModel->assign(array($field[0] => $value), null, $field);
+                                $newEntityObjects[] = $tmpModel;
                             }
-                        }
-
-                        if (!$allFieldsAreEmpty) {
-                            //create new validation and add it to the group messenger
-                            $validation = new Validation();
+                        } else {
+                            //check if all fields are empty
+                            $allFieldsAreEmpty = true;
                             $relationModelColumns = $this->mapper->getColumnsOfEntity($relationModelName, 'noRemovedColumns');
-                            foreach ($relationModelColumns as $tmpCol) {
-                                $validators = $this->getColumnGroup($relationAliasName)->getColumn($tmpCol)->getValidators();
-                                foreach ($validators as $validator) {
-                                    $validation->add($tmpCol, $validator);
-                                }
-                            }
-                            //validate with the given result
-                            $errors = $validation->validate($relationValue);
-                            //modify the error message field and code to assign the error better in angular later on
-                            if ($errors->count() > 0) {
-                                foreach ($errors as $err) {
-                                    $err->setCode($relationValue[$err->getField()]);
-                                    $err->setField(Group::GROUP_PREFIX . $relationAliasName . '.' . $row . '.' . $err->getField());
-                                    $validError->appendMessage($err);
-                                }
-                            }
-                            //create a model and assign the result
-                            $tmpModel = new $relationModelName();
 
-                            $tmpModel->assign($relationValue, null, $relationModelColumns);
-                            $newEntityObjects[] = $tmpModel;
+                            foreach ($relationValue as $k=>$vl) {
+
+                                if(is_string($vl)){
+                                    $relationValue[$k] = trim($vl);
+                                }
+
+                                if (!empty($vl) && $vl != "__autoincrement__") {
+                                    $allFieldsAreEmpty = false;
+                                }
+                                //deletes autoincrement fields
+                                if($vl == "__autoincrement__"){
+                                    unset($relationValue[$k]);
+                                    unset($relationModelColumns[array_search($k,$relationModelColumns)]);
+                                }
+                            }
+
+
+                            if (!$allFieldsAreEmpty) {
+                                //create new validation and add it to the group messenger
+                                $validation = new Validation();
+                                foreach ($relationModelColumns as $tmpCol) {
+                                    $validators = $this->getColumnGroup($relationAliasName)->getColumn($tmpCol)->getValidators();
+                                    if ($validators) {
+                                        foreach ($validators as $validator) {
+                                            $validation->add($tmpCol, $validator);
+                                        }
+                                    }
+                                }
+                                //validate with the given result
+                                $errors = $validation->validate($relationValue);
+                                //modify the error message field and code to assign the error better in angular later on
+                                if ($errors->count() > 0) {
+                                    foreach ($errors as $err) {
+                                        $err->setCode($relationValue[$err->getField()]);
+                                        $err->setField(Group::GROUP_PREFIX . $relationAliasName . '.' . $row . '.' . $err->getField());
+                                        $validError->appendMessage($err);
+                                    }
+                                }
+
+
+                                //create a model and assign the result
+                                $tmpModel = new $relationModelName();
+
+                                $tmpModel->assign($relationValue, null, $relationModelColumns);
+                                $newEntityObjects[] = $tmpModel;
+                            }
                         }
+
                     }
-
-
                 }
+
                 //assign the group-models to the main model
                 if (count($newEntityObjects) > 0) {
                     $model->{$relationAliasName} = $newEntityObjects;
                 }
             }
+
 
             //get all fields and associate it with the model name
             $modelColumns = $this->mapper->getColumnsOfEntity($model, 'noRemovedColumns');
@@ -318,6 +344,7 @@ class Grid extends Component implements EventsAwareInterface
                 }
             }
 
+
             //finally save the new entity
             if ($validError->count() == 0 && $model->save($request, $modelColumns) == false) {
                 $this->response->setStatusCode(401);
@@ -325,6 +352,7 @@ class Grid extends Component implements EventsAwareInterface
                 foreach ($model->getMessages() as $message) {
                     $errors[$message->getField()] = $message->getMessage();
                 }
+
                 $this->view->{JsonResponse::ERROR} = $errors;
             } elseif ($validError->count() != 0) {
                 $this->response->setStatusCode(401);
@@ -357,10 +385,12 @@ class Grid extends Component implements EventsAwareInterface
             $modelName = $this->mapper->getModelNameFromAlias($this->query->getFrom());
             /** @var \Phalcon\Mvc\Model $model */
 
-            var_dump($condition);
-            exit;
-            $model = $modelName::findFirst($condition);
+            //a id must be given
+            if (count($this->getAction()->getLinkParams()) == 1) {
+                exit;
+            }
 
+            $model = $modelName::findFirst($condition);
             if ($model) {
                 $behaviors = $this->getAction()->getType(Grid::DELETE)->getBehaviors();
                 if ($behaviors) {
@@ -381,9 +411,15 @@ class Grid extends Component implements EventsAwareInterface
      */
     protected function _setGridMode()
     {
+
         switch ($this->dispatcher->getParam(self::MODE)) {
             case "edit":
                 self::$mode = self::EDIT;
+
+                if (in_array(Grid::EDIT, $this->dispatcher->getParams()) && in_array(Grid::NEW, $this->dispatcher->getParams())) {
+                    self::$mode = self::NEW;
+                }
+
                 $this->view->pick('grid/' . self::EDIT);
                 break;
             case "details":
@@ -402,7 +438,8 @@ class Grid extends Component implements EventsAwareInterface
         }
     }
 
-    private function _setFieldValues($column){
+    private function _setFieldValues($column)
+    {
         if ($column->getConnectionTable() !== false) {
             $connectionTable = $column->getConnectionTable();
             $column->setFieldValue($connectionTable->getFieldValues());
@@ -415,10 +452,14 @@ class Grid extends Component implements EventsAwareInterface
         $col = Group::getColumnName($col);
         $relations = $this->mapper->getEntity($entity)->getRelations();
 
-        if(count($relations)>0){
+
+        if (count($relations) > 0) {
             foreach ($relations as $relation) {
                 if ($relation->getType() == Model\Relation::HAS_ONE AND $relation->getFields() == $col) {
                     $col2->setFieldType('enum');
+                    if ($this->query->getFrom() == $entity) {
+                        $col2->setCallback(array(new Callback(), 'hasOneRender'), Grid::TABLE);
+                    }
                     $connection = new ConnectedTable();
                     $connection->setSourceTable($relation->getReferencedModel())->setSourceField($relation->getReferencedFields());
                     $col2->setConnectionTable($connection);
@@ -562,9 +603,12 @@ class Grid extends Component implements EventsAwareInterface
                         ->setAlias($alias);
 
 
-                    //remove id and related fields
+                    //hiden id and related fields
                     if (in_array(($relationAlias) ? Group::getColumnName($fieldName) : $fieldName, $keys)) {
                         $col->setRemove(true);
+                        $col->setRemove(false, array(), Grid::EDIT);
+                        $col->setHidden(true, array(), Grid::EDIT);
+                        $col->setRemove(true, array(), Grid::NEW);
                     }
 
 
@@ -576,8 +620,11 @@ class Grid extends Component implements EventsAwareInterface
                         $col->setFieldType($column['type'])->setValidator($validator::getValidator($column['type'], $column));
                         if ($column['type'] == "datetime" || $column['type'] == "timestamp") {
                             $col->setCallback(array(new Callback(), 'datetime'), Grid::EDIT);
+                            $col->setCallback(array(new Callback(), 'datetime'), Grid::NEW);
+
                         }
                     }
+
 
                     $this->_columnHasOneRelation($this->mapper->getModelNameFromAlias(($relationAlias) ? $relationAlias : $this->query->getFrom()), $fieldName, $col);
 
@@ -586,6 +633,9 @@ class Grid extends Component implements EventsAwareInterface
                         $col->setCallback(array(new \FhpPhalconGrid\Grid\Action\Callback(), 'render'), Grid::TABLE);
                         $col->setRemove(true, array(), Grid::DETAILS);
                         $col->setRemove(true, array(), Grid::EDIT);
+                        $col->setRemove(true, array(), Grid::NEW);
+                        $col->setSortable(false);
+                        $col->setFilterable(false);
                     }
 
                     //Create the Group fields and modify the columns to correct them
@@ -594,7 +644,6 @@ class Grid extends Component implements EventsAwareInterface
 
                         //TODO put it into own
                         $test = $this->mapper->getModelNameFromAlias(Group::getRelationAlias($alias, true));
-
 
                         //use it when its a belongto table
                         if ($this->_skipBelongsToAndHasOneRelationsOfFrom($test)) {
@@ -619,18 +668,20 @@ class Grid extends Component implements EventsAwareInterface
                             $rel = $this->mapper->getEntity($this->query->getFrom())->getRelations();
 
                             if (count($relations) == 2) {
+
                                 $hasFromTable = false;
                                 $relatedArr = array();
                                 foreach ($relations as $relation) {
+
                                     if ($relation->getReferencedModel() == $this->query->getFrom() &&
-                                        $relation->getFields() == $rel[$test]->getReferencedFields()
+                                        $relation->getFields() == $rel[$test.Group::getRelationAlias($alias, true)]->getReferencedFields()
                                     ) { //and from table related field
                                         $hasFromTable = true;
                                     } else {
                                         $relatedArr = new ConnectedTable();
                                         $relatedArr->setAlias($relation->getOptions()['alias'])
-                                            ->setConnectedFromField($rel[$test]->getReferencedFields())
-                                            ->setConnectedField($rel[$test]->getFields())
+                                            ->setConnectedFromField($rel[$test.Group::getRelationAlias($alias, true)]->getReferencedFields())
+                                            ->setConnectedField($rel[$test.Group::getRelationAlias($alias, true)]->getFields())
                                             ->setConnectedTable($test)
                                             ->setSourceTable($relation->getReferencedModel())
                                             ->setConnectedToField($relation->getFields())
@@ -660,6 +711,8 @@ class Grid extends Component implements EventsAwareInterface
 
                             if ($groupColumn['type'] == "datetime" || $groupColumn['type'] == "timestamp") {
                                 $col->setCallback(array(new Callback(), 'datetime'), Grid::EDIT);
+                                $col->setCallback(array(new Callback(), 'datetime'), Grid::NEW);
+
                             }
 
                             if ($groupColumn['type'] == 'enum' || $groupColumn['type'] == 'set') {
@@ -674,6 +727,7 @@ class Grid extends Component implements EventsAwareInterface
                             } else {
                                 $col->setRemove(false);
                                 $col->setFieldType('set');
+                                $col->setValidator(null);
 
                                 $permission = new Permission();
                                 $config = new Config(false, array());
@@ -681,7 +735,6 @@ class Grid extends Component implements EventsAwareInterface
                                 $this->columns[$relationAlias]->setPermission($permission);
                             }
                         }
-
 
                         $this->columns[$relationAlias]->addColumn($col);
                     } else {
@@ -693,7 +746,8 @@ class Grid extends Component implements EventsAwareInterface
                 }
                 $colPosition++;
             }
-            $cache->save('COLUMNS_' . md5($this->query->getFrom()), serialize($this->columns));
+
+            //$cache->save('COLUMNS_' . md5($this->query->getFrom()), serialize($this->columns));
         } else {
             $this->columns = unserialize($cache->get('COLUMNS_' . md5($this->query->getFrom())));
         }
@@ -737,8 +791,10 @@ class Grid extends Component implements EventsAwareInterface
 
     public function render()
     {
+
+
         $request = new Request();
-        if (self::getMode() == Grid::EDIT && $request->getMethod() == 'PUT') {
+        if ((self::getMode() == Grid::EDIT || self::getMode() == Grid::NEW) && $request->getMethod() == 'PUT') {
             //SAVE
             $this->_save();
         } else {
@@ -759,6 +815,7 @@ class Grid extends Component implements EventsAwareInterface
             $col = array();
             $callbacks = array();
             /** @var Column $column */
+
             foreach ($this->columns as $column) {
 
                 //skip the column if its really removed
@@ -769,7 +826,12 @@ class Grid extends Component implements EventsAwareInterface
                 //normal column
                 if (is_a($column, 'FhpPhalconGrid\Grid\Column')) {
                     $column->build();
-                    $col[] = ($column->getTableAlias() ? '[' . $column->getTableAlias() . ']' . '.' : '') . $column->getField() . ($column->getType() == Column::TYPE_QUERY ? ' AS ' . $column->getAliasOrField() : '');
+                    if($column->getPhql()){
+                        $col[] = $column->getPhql();
+
+                    }else{
+                        $col[] = ($column->getTableAlias() ? '[' . $column->getTableAlias() . ']' . '.' : '') . $column->getField() . ($column->getType() == Column::TYPE_QUERY ? ' AS ' . $column->getAliasOrField() : '');
+                    }
                     if ($column->getCallback()) {
                         $callbacks[$column->getAliasOrField()] = $column->getCallback();
                     }
@@ -782,6 +844,8 @@ class Grid extends Component implements EventsAwareInterface
                     if ($column->getConnectionTable() !== false) {
                         $cTable = $column->getConnectionTable();
                         $cTableCol = $column->getColumn($cTable->getConnectedToField());
+                        //setting name of the Group to column
+                        $cTableCol->setName($column->getName());
                         $col[] = '(SELECT GROUP_CONCAT(' . $this->mapper->getEntity($cTable->getConnectedTable())->getPhqlName() . '.' . $cTable->getConnectedToField() . ') FROM ' . $cTable->getConnectedTable() . ' WHERE ' . $this->mapper->getEntity($this->query->getFrom())->getPhqlName() . '.' . $cTable->getConnectedField() . ' = ' . $cTable->getConnectedTable() . '.' . $cTable->getConnectedFromField() . ') as ' . $column->getAliasOrField();
                         $callbacks[$column->getAliasOrField()]['groupCallback'] = $column->getCallback();
                         $cTableCol->setFieldValue($cTable->getFieldValues());
@@ -808,10 +872,23 @@ class Grid extends Component implements EventsAwareInterface
 
             $this->_getHeadInformation();
 
-
-            if (self::getMode() == Grid::DETAILS OR self::getMode() == Grid::EDIT) {
+            if (self::getMode() == Grid::DETAILS OR self::getMode() == Grid::EDIT OR self::getMode() == Grid::NEW) {
                 $this->_createWhere();
                 $result['items'] = $this->query->getQuery()->setUniqueRow(true)->execute();
+
+
+                //manipulate value
+                if(self::getMode() == Grid::EDIT OR self::getMode() == Grid::NEW){
+                    foreach($this->columns as $ckey => $column){
+                        if(method_exists($column,'getValue') && !empty($column->getValue())){
+                            if(!is_array( $result['items'] )){
+                                $result['items']  = (array)  $result['items'] ;
+                            }
+                            $result['items'][$ckey] = $column->getValue();
+                        }
+                    }
+                }
+
             } else {
                 //add sorting and filter function
                 $this->setOrderBy();
@@ -819,7 +896,10 @@ class Grid extends Component implements EventsAwareInterface
                 $result = $this->getPagination()->setQuery($this->query, $this->getUrlParam(Grid::URL_PARAMS_PAGINATION))->getResult();
             }
             $this->result = $result;
+
+
             $this->columnCallbacks($callbacks);
+
             //$this->getEventsManager()->fire("grid:afterQuery", $this, $result);
 
             $this->view->data = $this->result;
@@ -852,7 +932,7 @@ class Grid extends Component implements EventsAwareInterface
                 $having .= $field . ' LIKE ' . $db->escapeString('%' . $value . '%');
             }
         }
-        
+
         if ($where != '') {
             $this->query->where($where, $whereBinds);
         }
@@ -951,7 +1031,7 @@ class Grid extends Component implements EventsAwareInterface
             $condition['bind'][$i] = $params;
             $i++;
 
-            if ($params == GRID::NEWENTRY) {
+            if ($params == GRID::NEW) {
                 return $params;
             }
         }
@@ -996,6 +1076,15 @@ class Grid extends Component implements EventsAwareInterface
         }
 
         return $this->columns[$column];
+    }
+
+    /**
+     * @param $column
+     * @return bool
+     */
+    public function columnExists($column)
+    {
+        return isset($this->columns[$column]);
     }
 
     /**
@@ -1056,28 +1145,32 @@ class Grid extends Component implements EventsAwareInterface
                 }
 
 
-                if ($this->getMode() == "edit") {
+                if ($this->getMode() == Grid::EDIT || $this->getMode() == Grid::NEW) {
                     $data[$column->getAliasOrField()]['permission'] = $column->getPermission();
                 }
             }
 
             if (!$column->isGroup()) {
                 //TODO make better - fieldType only in grid till filter is there
-                //if ($this->getMode() == "edit") {
                 if ($group !== null) {
+                    $data[$group]['fields'][$column->getAliasOrField()]['fieldDefaultValue'] = $column->getFieldDefaultValue();
                     $data[$group]['fields'][$column->getAliasOrField()]['fieldType'] = $column->getFieldTypeAjax();
                     $data[$group]['fields'][$column->getAliasOrField()]['fieldValue'] = $column->getFieldValue();
                     $data[$group]['fields'][$column->getAliasOrField()]['validators'] = $column->getValidatorsAjax();
                 } else {
                     $data[$column->getAliasOrField()]['fieldType'] = $column->getFieldTypeAjax();
                     $data[$column->getAliasOrField()]['fieldValue'] = $column->getFieldValue();
+                    $data[$column->getAliasOrField()]['fieldDefaultValue'] = $column->getFieldDefaultValue();
+
                     $data[$column->getAliasOrField()]['validators'] = $column->getValidatorsAjax();
                 }
-                //}
             } else {
+
+
                 $data = $this->_createHeadInformationArray($data, $column->getColumns(), $table);
             }
         }
+
 
         return $data;
     }

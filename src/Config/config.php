@@ -41,14 +41,6 @@ return new \Phalcon\Config(array(
         'passwordSalt' => 'eEAfR|_&G&f,+vU]:jAS!!A&+71w1Ms9~8_4L!<@[N@DyaIP_2My|:+.u>/6m,$D',
         'bcryptCost' => 12,
         'guestRole' => 'guest',
-        'redirect' => array(
-            'login' => array('pattern' => '/login', 'controller' => 'auth', 'action' => 'login'),
-            'logout' => array('pattern' => '/logout', 'controller' => 'auth', 'action' => 'logout'),
-            'forbidden' => array('pattern' => '/forbidden', 'controller' => 'auth', 'action' => 'forbidden'),
-            'pwreset' => array('pattern' => '/pwreset', 'controller' => 'auth', 'action' => 'pwreset'),
-            'pwconfirm' => array('pattern' => '/pwconfirm/([a-zA-Z0-9\_\-]+)/([a-zA-Z0-9\_\-]+)', 'controller' => 'auth', 'action' => 'pwconfirm', 'login' => 1, 'confirm' => 2),
-            'successLogin' => array('pattern' => '/success', 'controller' => 'auth', 'action' => 'index'),
-        ),
         'guard' => array(
             'policy' => true,
             'rules' => array(

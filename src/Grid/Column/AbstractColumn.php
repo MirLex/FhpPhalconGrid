@@ -21,25 +21,25 @@ abstract class AbstractColumn
      * Name of the column
      * @var array
      */
-    private $name = array(Grid::TABLE => null, Grid::DETAILS => null, Grid::EDIT => null);
+    private $name = array(Grid::TABLE => null, Grid::DETAILS => null, Grid::EDIT => null, Grid::NEW => null);
 
     /**
      * define if a column is hidden
      * @var array
      */
-    private $hidden = array(Grid::TABLE => false, Grid::DETAILS => false, Grid::EDIT => false);
+    private $hidden = array(Grid::TABLE => false, Grid::DETAILS => false, Grid::EDIT => false, Grid::NEW => false);
 
     /**
      * define if a column should get removed
      * @var array
      */
-    private $remove = array(Grid::TABLE => false, Grid::DETAILS => false, Grid::EDIT => false);
+    private $remove = array(Grid::TABLE => false, Grid::DETAILS => false, Grid::EDIT => false, Grid::NEW => false);
 
     /**
      * Callback function which is called after fetch
      * @var array
      */
-    private $callback = array(Grid::TABLE => false, Grid::DETAILS => false, Grid::EDIT => false);
+    private $callback = array(Grid::TABLE => false, Grid::DETAILS => false, Grid::EDIT => false, Grid::NEW => false);
 
     /**
      * define if a column should be filterable
@@ -64,7 +64,7 @@ abstract class AbstractColumn
      * the position of the column
      * @var array
      */
-    private $position = array(Grid::TABLE => null, Grid::DETAILS => null, Grid::EDIT => null);
+    private $position = array(Grid::TABLE => null, Grid::DETAILS => null, Grid::EDIT => null, Grid::NEW => null);
 
     /**
      * Field name of the column like it is in the query
@@ -73,8 +73,21 @@ abstract class AbstractColumn
     private $field = null;
 
 
+    private $renderType = null;
+
+    public function setRenderType($type){
+        $this->renderType = $type;
+        return $this;
+    }
+
+    public function getRenderType(){
+        return $this->renderType;
+    }
 
 
+    /**
+     * @return  ConnectedTable
+     */
     public function getConnectionTable(){
         return $this->connectionTable;
     }
@@ -115,6 +128,14 @@ abstract class AbstractColumn
         if ($mode === null) {
             $mode = Grid::getMode();
         }
+
+        if(isset($this->renderType) and !empty($this->renderType)){
+            if($this->renderType == "checkbox"){
+                $this->callback = $this->_setModeOptions($this->callback, array(new Callback(), 'checkbox'), Grid::TABLE);
+                $this->callback = $this->_setModeOptions($this->callback, array(new Callback(), 'checkbox'), Grid::DETAILS);
+            }
+        }
+
         return $this->callback[$mode];
     }
 
@@ -139,6 +160,7 @@ abstract class AbstractColumn
         if ($mode === null) {
             $mode = Grid::getMode();
         }
+
         if (is_bool($this->remove[$mode])) {
             return $this->remove[$mode];
         }
@@ -305,7 +327,7 @@ abstract class AbstractColumn
     protected function _setModeOptions($field, $value, $mode)
     {
 
-        $types = array(Grid::TABLE, Grid::DETAILS, Grid::EDIT);
+        $types = array(Grid::TABLE, Grid::DETAILS, Grid::EDIT, Grid::NEW);
         if ($mode === null) {
             foreach ($types as $mode) {
                 $field[$mode] = $value;

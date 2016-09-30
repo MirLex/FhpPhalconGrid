@@ -26,10 +26,16 @@ class Config
      */
     public function getValue()
     {
+        if (count($this->roles)==1 AND $this->roles[0] == '*') {
+            return $this->value;
+        }
+
         if (count($this->roles)>0) {
             $user = \FhpPhalconAuth\Service\User::getInstance();
 
-            if ($this->value === true AND is_array($user) AND array_intersect($user['roles'], $this->roles)) {
+        
+
+            if ($this->value === true AND isset($user->data->roles) AND array_intersect($user->data->roles, $this->roles)) {
                 return $this->value;
             }
             return ($this->value === true ? false : true);

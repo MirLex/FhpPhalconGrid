@@ -54,7 +54,7 @@ class Mapper extends Component
 
             $remove = false;
             $permission = $col->getPermission();
-            if ($col->isRemove('edit') == true OR $permission['edit'] == false) {
+            if ($col->isRemove(Grid::getMode()) == true OR $permission[Grid::EDIT] == false) {
                 $remove = true;
             }
             if (!$col->isGroup()) {
@@ -390,7 +390,7 @@ class Mapper extends Component
 
                     if ($this->modelsManager->getRelations($entityClass)) {
                         foreach ($this->modelsManager->getRelations($entityClass) as $model) {
-                            $entities[$entityClass]['relations'][$model->getReferencedModel()] = $model;
+                            $entities[$entityClass]['relations'][$model->getReferencedModel().$model->getOption('alias')] = $model;
                         }
 
                     }
@@ -423,7 +423,12 @@ class Mapper extends Component
             $this->tableToModel[$options['table']] = $entityName;
 
             $entityToTableMapper = new Entity();
-            $entityToTableMapper->setName($entityName)->setTable($options['table'])->setSchema($options['schema'])->setColumns($options['columns'])->setPrimary($options['primary'])->setRelations((isset($options['relations'])?$options['relations']:null))->setRelatedFields($options['relatedFields']);
+            $entityToTableMapper->setName($entityName)->setTable($options['table'])->setSchema($options['schema'])->setColumns($options['columns'])->setPrimary($options['primary'])
+                ->setRelations((isset($options['relations'])?$options['relations']:null))
+                ->setRelatedFields($options['relatedFields']);
+
+      
+
             $this->addEntity($entityToTableMapper);
         }
     }

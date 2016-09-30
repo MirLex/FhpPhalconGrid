@@ -29,6 +29,47 @@ class Column extends AbstractColumn
      */
     private $modelName;
 
+    private $phql = array(Grid::TABLE => null, Grid::DETAILS => null, Grid::EDIT => null, Grid::NEW => null);
+
+    /**
+     * @return mixed
+     */
+    public function getPhql($mode = null)
+    {
+        if ($mode === null) {
+            $mode = Grid::getMode();
+        }
+        return $this->phql[$mode];
+    }
+
+    /**
+     * @param mixed $phql
+     */
+    public function setPhql($phql,$mode=null)
+    {
+        $this->phql = $this->_setModeOptions($this->phql, $phql, $mode);
+        return $this;
+    }
+
+    private $fieldDefaultValue = null;
+
+    /**
+     * @return null
+     */
+    public function getFieldDefaultValue()
+    {
+        return $this->fieldDefaultValue;
+    }
+
+    /**
+     * @param null $fieldDefaultValue
+     */
+    public function setFieldDefaultValue($fieldDefaultValue)
+    {
+        $this->fieldDefaultValue = $fieldDefaultValue;
+        return $this;
+    }
+
     /**
      * Type of the column
      * @var String
@@ -87,8 +128,8 @@ class Column extends AbstractColumn
      */
     public function setFieldValue($fieldValue)
     {
-        if(!is_array($fieldValue)){
-            $fieldValue = explode(',',str_replace('\'','',$fieldValue));
+        if (!is_array($fieldValue)) {
+            $fieldValue = explode(',', str_replace('\'', '', $fieldValue));
             $fieldValue = array_combine($fieldValue, $fieldValue);
         }
         $this->fieldValue = $fieldValue;
@@ -196,6 +237,10 @@ class Column extends AbstractColumn
                 throw new Exception('The db field type "' . $this->fieldType . '" is unknown!');
                 break;
 
+        }
+
+        if ($this->getRenderType() != null) {
+            return $this->getRenderType();
         }
 
         return $type;
@@ -372,6 +417,8 @@ class Column extends AbstractColumn
      */
     public function build()
     {
+
+
         if ($this->build === false) {
             if ($this->getField() == null) {
                 $this->setField($this->getName(Grid::TABLE));
@@ -381,6 +428,13 @@ class Column extends AbstractColumn
 
             if ($this->getTableAlias() == $this->getTable()) {
                 $this->setTableAlias($this->getModelName());
+            }
+
+            if($this->getName(Grid::TABLE) == Action::COLUMNALIAS){
+                $this->setName('');
+            }else{
+                $this->setName(ucfirst($this->getName(Grid::TABLE)));
+
             }
             $this->build = true;
         }

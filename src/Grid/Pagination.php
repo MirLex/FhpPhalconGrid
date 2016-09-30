@@ -34,6 +34,7 @@ class Pagination
      */
     public function getResult()
     {
+
         $this->result = $this->query->getQuery()->execute()->toArray();
         //SQL_CALC_FOUND_ROWS was not used because count is faster
         $total = $this->orig->columns('COUNT(id) as total,' . $this->query->getColumns())->getQuery()->execute();
@@ -44,9 +45,7 @@ class Pagination
             $this->total = 0;
         }
         
-        if ($this->limit != 0 AND count($this->result) == 0 AND $this->query->getWhere()==null) {
-            throw new Exception('There is a problem with the pagination limit param!');
-        }
+        
 
         return array('items' => $this->result,
             'total_items' => $this->total,
